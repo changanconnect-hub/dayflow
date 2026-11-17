@@ -246,8 +246,8 @@ const reviewKey=()=>new Date().getHours()<4?keyAdd(todayKey(),-1):todayKey();
 const daysLabel=d=>{const s=[...d].sort().join();if(s==='0,1,2,3,4,5,6')return 'Every day';if(s==='1,2,3,4,5')return 'Mon–Fri';if(s==='0,6')return 'Weekends';return [1,2,3,4,5,6,0].filter(i=>d.includes(i)).map(i=>DOWS[i]).join(' ')};
 
 /* ---------- state ---------- */
-function fresh(){return {v:1,template:JSON.parse(JSON.stringify(DEFAULT_TEMPLATE)),days:{},notes:[],settings:{sound:true,vibrate:true,awake:true},quick:null}}
-function load(){try{const s=JSON.parse(localStorage.getItem(KEY));if(s&&Array.isArray(s.template)){s.days=s.days||{};s.notes=s.notes||[];s.settings=Object.assign({sound:true,vibrate:true,awake:true},s.settings||{});return s}}catch(e){}return fresh()}
+function fresh(){return {v:1,template:JSON.parse(JSON.stringify(DEFAULT_TEMPLATE)),days:{},notes:[],settings:{sound:true,vibrate:true,awake:true,bs:15,bl:30},quick:null}}
+function load(){try{const s=JSON.parse(localStorage.getItem(KEY));if(s&&Array.isArray(s.template)){s.days=s.days||{};s.notes=s.notes||[];s.settings=Object.assign({sound:true,vibrate:true,awake:true,bs:15,bl:30},s.settings||{});return s}}catch(e){}return fresh()}
 let S=load();
 function save(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){toast('⚠️ Could not save')}}
 let TAB='today',CTX=null,NF={area:'all',q:''};
@@ -258,6 +258,7 @@ function findTask(id){const tk=todayKey();const keys=[tk,keyAdd(tk,-1),keyAdd(tk
 function findRunning(){const tk=todayKey();for(const k of [tk,keyAdd(tk,-1)]){const d=S.days[k];if(!d)continue;const t=d.tasks.find(x=>x.status==='running');if(t)return {k,d,t}}return null}
 
 /* ---------- smart re-planning ---------- */
+function gap(t){const st=S.settings;return (t&&t.dur>=60)?(st.bl==null?30:+st.bl):(st.bs==null?15:+st.bs)}
 // ref task moved from [oldStart,oldEnd] to [newStart,newEnd]; shift what's after it, push anything overlapping.
 function replan(d,ref,oldStart,oldEnd,newStart,newEnd){
  const now=nowMin();
@@ -267,17 +268,18 @@ function replan(d,ref,oldStart,oldEnd,newStart,newEnd){
  const fixed=todo.filter(t=>t.fixed);
  let prev=now;
  const run=d.tasks.find(t=>t.status==='running'&&t!==ref);
- if(run)prev=Math.max(prev,run.start+run.dur);
+ if(run)prev=Math.max(prev,run.start+run.dur+gap(run));
  let moved=0;
  for(const t of todo){
   if(t.fixed)continue;
   if(t.start<now&&t.start<oldStart)continue; // earlier overdue tasks stay marked late
   let ns=t.start>=oldStart?t.start+shift:t.start;
   ns=Math.max(ns,prev);
-  if(ns<newEnd&&ns+t.dur>newStart)ns=newEnd;
-  for(const f of fixed){if(ns<f.start+f.dur&&ns+t.dur>f.start)ns=f.start+f.dur}
+  const refEnd=newEnd+(ref?gap(ref):0);
+  if(ns<refEnd&&ns+t.dur>newStart)ns=refEnd;
+  for(const f of fixed){if(ns<f.start+f.dur+gap(f)&&ns+t.dur+gap(t)>f.start)ns=f.start+f.dur+gap(f)}
   if(ns!==t.start){t.start=ns;moved++}
-  prev=ns+t.dur;
+  prev=ns+t.dur+gap(t);
  }
  return moved;
 }
@@ -285,22 +287,22 @@ function replan(d,ref,oldStart,oldEnd,newStart,newEnd){
 function pushAfter(d,ref){
  const todo=d.tasks.filter(t=>t!==ref&&t.status==='todo'&&!t.fixed).sort((a,b)=>a.start-b.start);
  const fixed=d.tasks.filter(t=>t!==ref&&t.status==='todo'&&t.fixed);
- let prev=ref.start+ref.dur,moved=0;
+ let prev=ref.start+ref.dur+gap(ref),moved=0;
  for(const t of todo){
   if(t.start+t.dur<=ref.start)continue;
   let ns=Math.max(t.start,prev);
-  for(const f of fixed){if(ns<f.start+f.dur&&ns+t.dur>f.start)ns=f.start+f.dur}
+  for(const f of fixed){if(ns<f.start+f.dur+gap(f)&&ns+t.dur+gap(t)>f.start)ns=f.start+f.dur+gap(f)}
   if(ns!==t.start){t.start=ns;moved++}
-  prev=Math.max(prev,ns+t.dur);
+  prev=Math.max(prev,ns+t.dur+gap(t));
  }
  return moved}
 function replanFromNow(d){
  const now=nowMin();const todo=d.tasks.filter(t=>t.status==='todo').sort((a,b)=>a.start-b.start);
  const fixed=todo.filter(t=>t.fixed);let prev=now;const run=d.tasks.find(t=>t.status==='running');
- if(run)prev=Math.max(prev,run.start+run.dur);let moved=0;
+ if(run)prev=Math.max(prev,run.start+run.dur+gap(run));let moved=0;
  for(const t of todo){if(t.fixed)continue;let ns=Math.max(t.start,prev);
-  for(const f of fixed){if(ns<f.start+f.dur&&ns+t.dur>f.start)ns=f.start+f.dur}
-  if(ns!==t.start){t.start=ns;moved++}prev=ns+t.dur}
+  for(const f of fixed){if(ns<f.start+f.dur+gap(f)&&ns+t.dur+gap(t)>f.start)ns=f.start+f.dur+gap(f)}
+  if(ns!==t.start){t.start=ns;moved++}prev=ns+t.dur+gap(t)}
  return moved;
 }
 
@@ -340,8 +342,8 @@ function missedList(){const tk=todayKey(),out=[];
  for(let i=1;i<=7;i++){const k=keyAdd(tk,-i),d=S.days[k];if(!d)continue;
   d.tasks.forEach(t=>{if((t.status==='todo'||(t.status==='running'&&i>1))&&!t.resolved&&t.tpl!=='plan')out.push({k,t})})}
  return out}
-function nextFree(d,base,dur){const busy=d.tasks.filter(t=>t.status==='todo'||t.status==='running').map(t=>[t.start,t.start+t.dur]).sort((a,b)=>a[0]-b[0]);
- let s=base;for(const [a,b] of busy){if(s+dur<=a)break;if(b>s)s=b}return s}
+function nextFree(d,base,dur){const busy=d.tasks.filter(t=>t.status==='todo'||t.status==='running').map(t=>[t.start,t.start+t.dur+gap(t)]).sort((a,b)=>a[0]-b[0]);
+ const g=gap({dur:dur});let s=base;for(const [a,b] of busy){if(s+dur+g<=a)break;if(b>s)s=b}return s}
 function rescheduleTo(k,t,targetKey){const d=day(targetKey);const isToday=targetKey===todayKey();
  const base=isToday?Math.ceil(nowMin()/5)*5:Math.min(9*60,...d.tasks.map(x=>x.start));
  const st=nextFree(d,base,t.dur);
@@ -528,6 +530,7 @@ function vPlan(){
  '<label class="tog"><input type="checkbox" data-bind="set_sound"'+(st.sound?' checked':'')+'> Sound when a timer ends</label>'+
  '<label class="tog"><input type="checkbox" data-bind="set_vibrate"'+(st.vibrate?' checked':'')+'> Vibrate</label>'+
  '<label class="tog"><input type="checkbox" data-bind="set_awake"'+(st.awake?' checked':'')+'> Keep screen on while a timer runs</label>'+
+ '<div class="grid2" style="margin-top:6px"><label>☕ Break after short tasks (min)<input type="number" inputmode="numeric" min="0" data-bind="set_bs" value="'+(st.bs==null?15:st.bs)+'"></label><label>☕ Break after 1h+ tasks (min)<input type="number" inputmode="numeric" min="0" data-bind="set_bl" value="'+(st.bl==null?30:st.bl)+'"></label></div><div class="hint">Used when the app moves tasks for you.</div>'+
  '<div class="row"><button class="btn" data-act="testSound">🔊 Test sound</button>'+(np==='granted'?'<span class="mut">🔔 Notifications on</span>':np==='unsupported'?'':'<button class="btn" data-act="notifPerm">🔔 Allow notifications</button>')+'</div>'+
  '<div class="hint">Tip: the alarm is loudest with the app open. Keep-screen-on makes that easy. If you leave the app, the time is still counted correctly.</div></div>'+
  '<h2 class="ttl">💾 Backup</h2><div class="card"><div class="mut">Your data lives only on this phone. Make a backup sometimes.</div><div class="row"><button class="btn" data-act="exportData">⬇️ Export</button><button class="btn" data-act="importData">⬆️ Import</button><button class="btn danger" data-act="resetAll">Reset all</button></div></div>'+
@@ -690,6 +693,8 @@ const BIND={
  nq:v=>{NF.q=v;$('#nlist').innerHTML=notesList()},
  rgFrom:v=>{RG.from=v},
  rgTo:v=>{RG.to=v},
+ set_bs:v=>{S.settings.bs=Math.max(0,parseInt(v,10)||0);save()},
+ set_bl:v=>{S.settings.bl=Math.max(0,parseInt(v,10)||0);save()},
  set_sound:(v,el)=>{S.settings.sound=el.checked;save()},
  set_vibrate:(v,el)=>{S.settings.vibrate=el.checked;save()},
  set_awake:(v,el)=>{S.settings.awake=el.checked;save();keepAwake(el.checked&&needAwake())}
@@ -698,7 +703,7 @@ function fallbackCopy(t){sheet('<h3>📋 Copy this</h3><textarea id="cpy" rows="
 function onBind(e){const k=e.target.dataset&&e.target.dataset.bind;if(k&&BIND[k])BIND[k](e.target.value,e.target)}
 document.addEventListener('input',e=>{if(e.target.type!=='checkbox')onBind(e)});
 document.addEventListener('change',e=>{if(e.target.type==='checkbox')onBind(e)});
-$('#importFile').addEventListener('change',e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{try{const s=JSON.parse(r.result);if(!s.template)throw 0;if(!confirm('Replace current data with this backup?'))return;S=s;S.settings=Object.assign({sound:true,vibrate:true,awake:true},S.settings||{});save();render();toast('Backup restored ✅')}catch(err){toast('That file is not a DayFlow backup')}};r.readAsText(f);e.target.value=''});
+$('#importFile').addEventListener('change',e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{try{const s=JSON.parse(r.result);if(!s.template)throw 0;if(!confirm('Replace current data with this backup?'))return;S=s;S.settings=Object.assign({sound:true,vibrate:true,awake:true,bs:15,bl:30},S.settings||{});save();render();toast('Backup restored ✅')}catch(err){toast('That file is not a DayFlow backup')}};r.readAsText(f);e.target.value=''});
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'){if(needAwake())keepAwake(true);if(!sheetOpen())render()}});
 
 /* ---------- ticking clock ---------- */
