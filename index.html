@@ -281,6 +281,19 @@ function replan(d,ref,oldStart,oldEnd,newStart,newEnd){
  }
  return moved;
 }
+// after a manual edit: push anything overlapping 'ref' to after it, cascading only where needed
+function pushAfter(d,ref){
+ const todo=d.tasks.filter(t=>t!==ref&&t.status==='todo'&&!t.fixed).sort((a,b)=>a.start-b.start);
+ const fixed=d.tasks.filter(t=>t!==ref&&t.status==='todo'&&t.fixed);
+ let prev=ref.start+ref.dur,moved=0;
+ for(const t of todo){
+  if(t.start+t.dur<=ref.start)continue;
+  let ns=Math.max(t.start,prev);
+  for(const f of fixed){if(ns<f.start+f.dur&&ns+t.dur>f.start)ns=f.start+f.dur}
+  if(ns!==t.start){t.start=ns;moved++}
+  prev=Math.max(prev,ns+t.dur);
+ }
+ return moved}
 function replanFromNow(d){
  const now=nowMin();const todo=d.tasks.filter(t=>t.status==='todo').sort((a,b)=>a.start-b.start);
  const fixed=todo.filter(t=>t.fixed);let prev=now;const run=d.tasks.find(t=>t.status==='running');
@@ -339,6 +352,11 @@ function missedCard(){const m=missedList();if(!m.length)return '';
  m.slice(0,8).map(({k,t})=>'<div class="mrow"><div class="mn">'+t.emoji+' '+esc(t.name)+'<small>'+fmtDate(k)+(t.note?' · '+esc(t.note):'')+'</small></div><button class="mb p" data-act="resToday" data-id="'+t.id+'">Today</button><button class="mb" data-act="resTom" data-id="'+t.id+'">Tmrw</button><button class="mb" data-act="letgo" data-id="'+t.id+'">✕</button></div>').join('')+
  (m.length>8?'<div class="mut" style="font-size:12px;margin-top:6px">+'+(m.length-8)+' more</div>':'')+'</div>'}
 function findOld(id){const tk=todayKey();for(let i=1;i<=7;i++){const k=keyAdd(tk,-i),d=S.days[k];if(!d)continue;const t=d.tasks.find(x=>x.id===id);if(t)return {k,d,t}}return null}
+
+/* ---------- activity picker ---------- */
+function pickerHtml(act,id){return '<div class="menu">'+S.template.filter(t=>t.id!=='plan').map(t=>'<button data-act="'+act+'" data-id="'+id+'|'+t.id+'" style="border-left:4px solid '+t.color+'">'+t.emoji+' '+esc(t.name)+' <span class="mut">· '+fmtDur(+t.dur)+'</span></button>').join('')+'</div>'}
+function addPicker(dayKey){CTX={addKey:dayKey};sheet('<h3>➕ Add to '+(dayKey===todayKey()?'today':fmtDate(dayKey))+'</h3><div class="mut">Pick one of your activities (counts in streaks & reports)</div>'+pickerHtml('addFromTpl',dayKey)+'<div class="or">— or —</div><button class="btn wide" data-act="addCustom" data-id="'+dayKey+'">⭐ Custom one-off task</button>')}
+function taskFromTpl(tp,start){return {id:uid(),tpl:tp.id,emoji:tp.emoji,name:tp.name,color:tp.color,start:start,planStart:start,dur:+tp.dur||10,timer:+tp.timer||0,fixed:false,status:'todo',note:''}}
 
 /* ---------- report ---------- */
 let PV='report',RG={mode:'week',from:'',to:''};
@@ -536,7 +554,7 @@ function editModal(t,mode,dayKey){
  '<div class="lbl">Color</div><div class="chips">'+COLORS.map(c=>'<button class="sw '+(c===t.color?'on':'')+'" style="background:'+c+'" data-act="colorChip" data-id="'+c+'"></button>').join('')+'</div>'+
  '<label class="tog"><input type="checkbox" id="eFixed"'+(t.fixed?' checked':'')+'> 📌 Fixed time (auto re-plan won\'t move it)</label>'+
  (mode==='day'?'<label>Note — what exactly will I do?<textarea id="eNote" rows="3">'+esc(t.note)+'</textarea></label>':'')+
- '<div class="row"><button class="btn pri" data-act="saveEdit">Save</button>'+(isNew?'':'<button class="btn danger" data-act="delEdit">Delete</button>')+'<button class="btn ghost" data-act="closeSheet">Cancel</button></div>');
+ '<div class="row"><button class="btn pri" data-act="saveEdit">Save</button>'+(mode==='day'&&!isNew&&t.status!=='done'?'<button class="btn" data-act="swapPick" data-id="'+t.id+'">🔁 Replace</button>':'')+(isNew?'':'<button class="btn danger" data-act="delEdit">Delete</button>')+'<button class="btn ghost" data-act="closeSheet">Cancel</button></div>');
 }
 function refreshPlanDay(){const pk=planKey(),d=S.days[pk];if(d&&!d.locked&&d.tasks.every(t=>t.status==='todo'||t.status==='skipped')){const nd=buildDay(pk);nd.tasks.forEach(t=>{const o=d.tasks.find(x=>x.tpl===t.tpl);if(o){t.note=o.note}});nd.tasks=nd.tasks.concat(d.tasks.filter(t=>!t.tpl));nd.tasks.sort((a,b)=>a.start-b.start);nd.focus=d.focus;S.days[pk]=nd}}
 
@@ -603,6 +621,7 @@ const ACT={
   if(t.status==='running')o.push(['finish','✓ Finish'],['cancelRun','✕ Cancel session'])
   if(t.status==='done')o.push(['doneManual','🕒 Change logged time'],['undo','↩ Undo done'])
   if(t.status==='skipped')o.push(['unskip','↩ Un-skip'])
+  if(t.status==='todo'||t.status==='skipped')o.push(['swapPick','🔁 Replace with another activity']);
   o.push(['editDay','✏️ Edit time / timer / note'],['noteFor','💡 Save an idea for this'],['removeTask','🗑 Remove from today']);
   sheet('<h3>'+t.emoji+' '+esc(t.name)+'</h3><div class="mut">'+(t.status==='done'?'Done '+hm(t.actualStart)+'–'+hm(t.actualEnd):'Planned '+hm(t.start)+'–'+hm(t.start+t.dur))+'</div>'+(t.note?'<div class="tnote">📝 '+esc(t.note)+'</div>':'')+'<div class="menu">'+o.map(x=>'<button data-act="'+x[0]+'" data-id="'+id+'">'+x[1]+'</button>').join('')+'</div>')},
  moveNow:id=>{closeSheet();const f=findTask(id);if(!f)return;const t=f.t,n=nowMin(),os=t.start;const R=findRunning();const ns=R?Math.max(n,R.t.start+R.t.dur):n;t.start=ns;replan(f.d,t,os,os+t.dur,ns,ns+t.dur);save();render();toast('Moved to '+hm(ns))},
@@ -616,8 +635,16 @@ const ACT={
   sheet('<h3>💡 Idea for '+(f?f.t.emoji+' '+esc(f.t.name):'')+'</h3><textarea id="qn" rows="4" placeholder="Write it before it disappears…"></textarea><button class="btn pri wide" data-act="saveQuickNote" data-id="'+area+'">Save idea</button>');setTimeout(()=>{const q=$('#qn');q&&q.focus()},250)},
  saveQuickNote:area=>{const v=$('#qn').value.trim();if(!v)return closeSheet();S.notes.push({id:uid(),area:area,text:v,ts:Date.now(),pinned:false,done:false});save();closeSheet();toast('💡 Saved to Notes')},
  replanNow:()=>{const n=replanFromNow(day(todayKey()));save();render();toast(n?'↻ Re-planned '+n+' task'+(n>1?'s':'')+' from now':'All good — nothing to move')},
- addToday:()=>{const n=nowMin();editModal({_new:true,emoji:'⭐',name:'',color:pick(COLORS),start:Math.ceil(n/5)*5,dur:30,timer:0,fixed:false,note:''},'day',todayKey())},
- addPlan:()=>editModal({_new:true,emoji:'⭐',name:'',color:pick(COLORS),start:12*60,dur:30,timer:0,fixed:false,note:''},'day',planKey()),
+ addToday:()=>addPicker(todayKey()),
+ addPlan:()=>addPicker(planKey()),
+ addCustom:k=>{closeSheet();const isT=k===todayKey();editModal({_new:true,emoji:'⭐',name:'',color:pick(COLORS),start:isT?Math.ceil(nowMin()/5)*5:12*60,dur:30,timer:0,fixed:false,note:''},'day',k)},
+ addFromTpl:v=>{const [k,tid]=v.split('|');const tp=S.template.find(x=>x.id===tid);if(!tp)return;const d=day(k);
+  const base=k===todayKey()?Math.ceil(nowMin()/5)*5:toMin(tp.start);const st=nextFree(d,base,+tp.dur||10);
+  d.tasks.push(taskFromTpl(tp,st));d.tasks.sort((a,b)=>a.start-b.start);save();closeSheet();render();toast(tp.emoji+' Added at '+hm(st))},
+ swapPick:id=>{closeSheet();const f=findTask(id);if(!f)return;sheet('<h3>🔁 Replace '+f.t.emoji+' '+esc(f.t.name)+' with…</h3><div class="mut">Keeps the same start time ('+hm(f.t.start)+')</div>'+pickerHtml('swapTo',id))},
+ swapTo:v=>{const [id,tid]=v.split('|');const f=findTask(id);const tp=S.template.find(x=>x.id===tid);if(!f||!tp)return;const t=f.t;const old=t.name;
+  Object.assign(t,{tpl:tp.id,emoji:tp.emoji,name:tp.name,color:tp.color,dur:+tp.dur||10,timer:+tp.timer||0,note:''});
+  if(f.k===todayKey())replan(f.d,t,t.start,t.start,t.start,t.start+t.dur);save();closeSheet();render();toast('🔁 '+old+' → '+tp.name)},
  skipT:id=>{const f=findTask(id);if(!f)return;f.t.status=f.t.status==='skipped'?'todo':'skipped';save();render()},
  resetPlan:()=>{if(!confirm('Reset this plan to your default day? (notes on tasks are kept)'))return;const pk=planKey();const old=S.days[pk];delete S.days[pk];const d=day(pk);if(old){d.focus=old.focus;d.tasks.forEach(t=>{const o=old.tasks.find(x=>x.tpl===t.tpl);if(o)t.note=o.note})}save();render()},
  lock:()=>{const pk=planKey();day(pk).locked=true;const r=day(reviewKey());const p=r.tasks.find(t=>t.tpl==='plan'&&t.status!=='done');if(p){const n=nowMin();p.status='done';p.actualStart=Math.max(0,n-5);p.actualEnd=n;p.start=p.actualStart}save();render();confetti();toast('Plan locked 🔒 Sleep well — tomorrow is ready.')},
@@ -633,9 +660,11 @@ const ACT={
   const v={emoji:$('#eEmoji').value.trim()||'⭐',name:name,color:c.color,dur:Math.max(1,parseInt($('#eDur').value,10)||10),timer:Math.max(0,parseInt($('#eTimer').value,10)||0),fixed:$('#eFixed').checked};
   if(c.mode==='tpl'){if(!c.days.length){toast('Pick at least one day');return}Object.assign(t,v,{start:$('#eStart').value||'12:00',days:[...c.days]});if(t._new){delete t._new;S.template.push(t)}refreshPlanDay();save();closeSheet();render();toast('Saved · applies from the next day')}
   else{const st=toMin($('#eStart').value||'12:00');const note=$('#eNote').value.trim();const d=day(c.dayKey);
-   if(t._new){d.tasks.push(Object.assign({id:uid(),tpl:null,start:st,planStart:st,status:'todo',note:note},v))}
+   let ref=t;
+   if(t._new){ref=Object.assign({id:uid(),tpl:null,start:st,planStart:st,status:'todo',note:note},v);d.tasks.push(ref)}
    else{Object.assign(t,v,{note:note});if(t.status==='todo'||t.status==='skipped'){t.start=st;t.planStart=st}}
-   d.tasks.sort((a,b)=>a.start-b.start);save();closeSheet();render();toast('Saved')}},
+   const moved=ref.status==='todo'?pushAfter(d,ref):0;
+   d.tasks.sort((a,b)=>a.start-b.start);save();closeSheet();render();toast('Saved'+(moved?' · moved '+moved+' task'+(moved>1?'s':'')+' after it':''))}},
  delEdit:()=>{const c=CTX;if(!confirm('Delete “'+c.t.name+'”?'))return;if(c.mode==='tpl'){S.template=S.template.filter(x=>x!==c.t);refreshPlanDay()}else{const d=day(c.dayKey);d.tasks=d.tasks.filter(x=>x!==c.t)}save();closeSheet();render()},
  addNote:()=>{const v=$('#nText').value.trim();if(!v){toast('Write something first');return}S.notes.push({id:uid(),area:$('#nArea').value,text:v,ts:Date.now(),pinned:false,done:false});save();render();toast('💡 Saved')},
  nfilter:id=>{NF.area=id;render()},
