@@ -355,6 +355,10 @@ function missedCard(){const m=missedList();if(!m.length)return '';
  (m.length>8?'<div class="mut" style="font-size:12px;margin-top:6px">+'+(m.length-8)+' more</div>':'')+'</div>'}
 function findOld(id){const tk=todayKey();for(let i=1;i<=7;i++){const k=keyAdd(tk,-i),d=S.days[k];if(!d)continue;const t=d.tasks.find(x=>x.id===id);if(t)return {k,d,t}}return null}
 
+/* ---------- backup ---------- */
+function doBackup(){try{S.lastBackup=Date.now();save();const b=new Blob([JSON.stringify(S,null,1)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='dayflow-backup-'+todayKey()+'.json';document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},800);return true}catch(e){return false}}
+function backupAgeDays(){return S.lastBackup?Math.floor((Date.now()-S.lastBackup)/86400000):null}
+
 /* ---------- activity picker ---------- */
 function pickerHtml(act,id){return '<div class="menu">'+S.template.filter(t=>t.id!=='plan').map(t=>'<button data-act="'+act+'" data-id="'+id+'|'+t.id+'" style="border-left:4px solid '+t.color+'">'+t.emoji+' '+esc(t.name)+' <span class="mut">· '+fmtDur(+t.dur)+'</span></button>').join('')+'</div>'}
 function addPicker(dayKey){CTX={addKey:dayKey};sheet('<h3>➕ Add to '+(dayKey===todayKey()?'today':fmtDate(dayKey))+'</h3><div class="mut">Pick one of your activities (counts in streaks & reports)</div>'+pickerHtml('addFromTpl',dayKey)+'<div class="or">— or —</div><button class="btn wide" data-act="addCustom" data-id="'+dayKey+'">⭐ Custom one-off task</button>')}
@@ -443,12 +447,14 @@ function vToday(){
  const late=tasks.some(t=>t.status==='todo'&&t.start+t.dur<now&&!t.fixed);
  const h=new Date().getHours();const pd=S.days[planKey()];
  const planBanner=(h>=21||h<4)&&!(pd&&pd.locked)?'<div class="banner"><span>🌙 Time to plan tomorrow (5 min)</span><button class="btn pri" data-act="goTomorrow">Plan</button></div>':'';
+ const age=backupAgeDays();const hasData=Object.keys(S.days).length>1;
+ const bkBanner=hasData&&(age===null||age>=3)?'<div class="banner" style="border-color:#ffb703;background:#3a2e10"><span>💾 '+(age===null?'No backup yet':'Last backup '+age+' days ago')+' — protect your data</span><button class="btn" data-act="exportData">Back up</button></div>':'';
  let q;
  if(S.quick){q='<div class="quick"><span>⏱</span><span class="qt" id="qtmr">--:--</span><span class="mut">'+esc(S.quick.label||'Quick timer')+'</span><span style="flex:1"></span><button class="q" data-act="quickStop">Stop</button></div>'}
  else{q='<div class="quick"><span>⏱ Timer</span><span style="flex:1"></span>'+[10,20,30,45].map(m=>'<button class="q" data-act="quick" data-id="'+m+'">'+m+'m</button>').join('')+'<button class="q" data-act="quick" data-id="custom">…</button></div>'}
  return '<div class="top"><div><div class="hello">'+greet()+'</div><div class="date">'+fmtDate(k)+'</div></div><div class="prog"><b>'+done+'/'+active.length+'</b><div class="mut">done</div></div></div>'+
  '<div class="bar"><i style="width:'+pct+'%"></i></div>'+
- (d.focus?'<div class="focus">🎯 <b>Today\'s focus:</b> '+esc(d.focus)+'</div>':'')+planBanner+hero+missedCard()+q+
+ (d.focus?'<div class="focus">🎯 <b>Today\'s focus:</b> '+esc(d.focus)+'</div>':'')+planBanner+bkBanner+hero+missedCard()+q+
  '<div class="tlh"><b>Timeline</b><span>'+(late?'<button class="link" data-act="replanNow">↻ Re-plan from now</button>':'')+'<button class="link" data-act="addToday">+ Add</button></span></div>'+
  (tasks.length?tasks.map(t=>taskRow(t,now,t.tpl&&S.template.find(x=>x.id===t.tpl)&&hState(yk,S.template.find(x=>x.id===t.tpl),k)==='miss')).join(''):'<div class="empty">Nothing planned today. Tap “+ Add”.</div>');
 }
@@ -533,7 +539,7 @@ function vPlan(){
  '<div class="grid2" style="margin-top:6px"><label>☕ Break after short tasks (min)<input type="number" inputmode="numeric" min="0" data-bind="set_bs" value="'+(st.bs==null?15:st.bs)+'"></label><label>☕ Break after 1h+ tasks (min)<input type="number" inputmode="numeric" min="0" data-bind="set_bl" value="'+(st.bl==null?30:st.bl)+'"></label></div><div class="hint">Used when the app moves tasks for you.</div>'+
  '<div class="row"><button class="btn" data-act="testSound">🔊 Test sound</button>'+(np==='granted'?'<span class="mut">🔔 Notifications on</span>':np==='unsupported'?'':'<button class="btn" data-act="notifPerm">🔔 Allow notifications</button>')+'</div>'+
  '<div class="hint">Tip: the alarm is loudest with the app open. Keep-screen-on makes that easy. If you leave the app, the time is still counted correctly.</div></div>'+
- '<h2 class="ttl">💾 Backup</h2><div class="card"><div class="mut">Your data lives only on this phone. Make a backup sometimes.</div><div class="row"><button class="btn" data-act="exportData">⬇️ Export</button><button class="btn" data-act="importData">⬆️ Import</button><button class="btn danger" data-act="resetAll">Reset all</button></div></div>'+
+ '<h2 class="ttl">💾 Backup</h2><div class="card"><div class="mut">Your data lives only on this phone. A backup is saved to <b>Downloads</b> automatically every night when you tap “Lock in my plan”.<br>Last backup: <b>'+(S.lastBackup?new Date(S.lastBackup).toLocaleString('en-GB',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'never')+'</b><br>⚠️ Never clear Chrome data for github.io — it deletes the app data.</div><div class="row"><button class="btn" data-act="exportData">⬇️ Export</button><button class="btn" data-act="importData">⬆️ Import</button><button class="btn danger" data-act="resetAll">Reset all</button></div></div>'+
  '<h2 class="ttl">📱 Home screen</h2><div class="card mut" style="line-height:1.5">In Chrome: tap ⋮ → <b>Add to Home screen</b> → <b>Install</b>. It then opens full-screen like a normal app, even offline.</div>';
 }
 
@@ -650,7 +656,7 @@ const ACT={
   if(f.k===todayKey())replan(f.d,t,t.start,t.start,t.start,t.start+t.dur);save();closeSheet();render();toast('🔁 '+old+' → '+tp.name)},
  skipT:id=>{const f=findTask(id);if(!f)return;f.t.status=f.t.status==='skipped'?'todo':'skipped';save();render()},
  resetPlan:()=>{if(!confirm('Reset this plan to your default day? (notes on tasks are kept)'))return;const pk=planKey();const old=S.days[pk];delete S.days[pk];const d=day(pk);if(old){d.focus=old.focus;d.tasks.forEach(t=>{const o=old.tasks.find(x=>x.tpl===t.tpl);if(o)t.note=o.note})}save();render()},
- lock:()=>{const pk=planKey();day(pk).locked=true;const r=day(reviewKey());const p=r.tasks.find(t=>t.tpl==='plan'&&t.status!=='done');if(p){const n=nowMin();p.status='done';p.actualStart=Math.max(0,n-5);p.actualEnd=n;p.start=p.actualStart}save();render();confetti();toast('Plan locked 🔒 Sleep well — tomorrow is ready.')},
+ lock:()=>{const pk=planKey();day(pk).locked=true;const r=day(reviewKey());const p=r.tasks.find(t=>t.tpl==='plan'&&t.status!=='done');if(p){const n=nowMin();p.status='done';p.actualStart=Math.max(0,n-5);p.actualEnd=n;p.start=p.actualStart}save();const ok=doBackup();render();confetti();toast(ok?'Plan locked 🔒 + backup saved 💾 Sleep well!':'Plan locked 🔒 (backup failed — use Plan → Export)')},
  mood:m=>{const r=day(reviewKey());r.mood=r.mood===m?'':m;save();render()},
  quick:id=>{let m=+id;if(id==='custom'){const v=prompt('Minutes?','25');m=parseInt(v,10);if(!m||m<1)return}
   const label=prompt('Label (optional) — e.g. “TikTok scroll”','')||'';unlockAudio();S.quick={endTs:Date.now()+m*60000,mins:m,label:label,alarmed:false};save();keepAwake(true);render()},
@@ -678,7 +684,7 @@ const ACT={
  nSave:()=>{const n=S.notes.find(x=>x.id===CTX.nid);if(n){n.text=$('#enT').value.trim()||n.text;n.area=$('#enA').value;save()}closeSheet();render()},
  testSound:()=>{unlockAudio();chime();if(S.settings.vibrate&&navigator.vibrate)navigator.vibrate([300,100,300])},
  notifPerm:()=>{try{Notification.requestPermission().then(()=>render())}catch(e){}},
- exportData:()=>{const b=new Blob([JSON.stringify(S,null,1)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='dayflow-backup-'+todayKey()+'.json';document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},500);toast('Backup downloaded')},
+ exportData:()=>{if(doBackup()){render();toast('💾 Backup saved to Downloads')}else toast('⚠️ Backup failed')},
  importData:()=>$('#importFile').click(),
  resetAll:()=>{if(!confirm('Delete ALL data and start fresh?'))return;if(!confirm('Really sure? Export a backup first if unsure.'))return;S=fresh();save();render()}
 };
@@ -703,7 +709,9 @@ function fallbackCopy(t){sheet('<h3>📋 Copy this</h3><textarea id="cpy" rows="
 function onBind(e){const k=e.target.dataset&&e.target.dataset.bind;if(k&&BIND[k])BIND[k](e.target.value,e.target)}
 document.addEventListener('input',e=>{if(e.target.type!=='checkbox')onBind(e)});
 document.addEventListener('change',e=>{if(e.target.type==='checkbox')onBind(e)});
-$('#importFile').addEventListener('change',e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{try{const s=JSON.parse(r.result);if(!s.template)throw 0;if(!confirm('Replace current data with this backup?'))return;S=s;S.settings=Object.assign({sound:true,vibrate:true,awake:true,bs:15,bl:30},S.settings||{});save();render();toast('Backup restored ✅')}catch(err){toast('That file is not a DayFlow backup')}};r.readAsText(f);e.target.value=''});
+$('#importFile').addEventListener('change',e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{try{const s=JSON.parse(r.result);if(!s.template)throw 0;const merge=confirm('MERGE into current data?\n\nOK = merge (adds the history, keeps what you did today)\nCancel = more options');
+ if(merge){S.template=s.template;S.days=Object.assign({},s.days||{},S.days);const ids=new Set(S.notes.map(n=>n.id));(s.notes||[]).forEach(n=>{if(!ids.has(n.id))S.notes.push(n)});S.settings=Object.assign({},S.settings,s.settings||{});save();render();toast('History merged ✅')}
+ else{if(!confirm('REPLACE everything with this file? (current data will be lost)'))return;S=s;S.days=S.days||{};S.notes=S.notes||[];S.settings=Object.assign({sound:true,vibrate:true,awake:true,bs:15,bl:30},S.settings||{});save();render();toast('Backup restored ✅')}}catch(err){toast('That file is not a DayFlow backup')}};r.readAsText(f);e.target.value=''});
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'){if(needAwake())keepAwake(true);if(!sheetOpen())render()}});
 
 /* ---------- ticking clock ---------- */
